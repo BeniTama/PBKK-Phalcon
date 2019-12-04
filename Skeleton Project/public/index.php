@@ -1,95 +1,153 @@
 <?php
+use Phalcon\Di\FactoryDefault;
+use Phalcon\Flash\Direct as FlashDirect;
+use Phalcon\Flash\Session as FlashSession;
+use Phalcon\Session\Adapter\Files as Session;
+use Phalcon\Crypt;
 
 error_reporting(E_ALL);
 
-use Phalcon\Loader;
-use Phalcon\Mvc\View as View;
-use Phalcon\DI\FactoryDefault;
-use Phalcon\Mvc\Url as UrlResolver;
-use Phalcon\Mvc\Application as Application;
-use Phalcon\Session\Adapter\Files as Session;
-use Phalcon\Db\Adapter\Pdo\Mysql as Database;
-use Phalcon\Mvc\Model\MetaData\Memory as MemoryMetaData;
+define('BASE_PATH', dirname(__DIR__));
+define('APP_PATH', BASE_PATH . '/app');
 
 try {
-    /**
-     * Read the configuration
-     */
-    $config = include __DIR__ . "/../app/config/config.php";
-
-    $loader = new Loader();
 
     /**
-     * We're a registering a set of directories taken from the configuration file
-     */
-    $loader->registerDirs(
-        [
-            $config->application->controllersDir,
-            $config->application->modelsDir
-        ]
-    )->register();
-
-    /**
-     * The FactoryDefault Dependency Injector automatically register the right services providing a full stack framework
+     * The FactoryDefault Dependency Injector automatically registers
+     * the services that provide a full stack framework.
      */
     $di = new FactoryDefault();
 
-    /**
-     * The URL component is used to generate all kind of urls in the application
-     */
-    $di->set('url', function () use ($config) {
-        $url = new UrlResolver();
-        $url->setBaseUri($config->application->baseUri);
-        return $url;
-    });
+
+    // Register the flash service with custom CSS classes
+    $di->set(
+        'flash',
+        function () {
+            $flash = new FlashDirect(
+                [
+                    'error'   => 'alert alert-danger',
+                    'success' => 'alert alert-success',
+                    'notice'  => 'alert alert-info',
+                    'warning' => 'alert alert-warning',
+                ]
+            );
+
+            return $flash;
+        }
+    );
+
+    // Register the flash service with custom CSS classes
+    $di->set(
+        'flashSession',
+        function () {
+            $flash = new FlashSession(
+                [
+                    'error'   => 'alert alert-danger',
+                    'success' => 'alert alert-success',
+                    'notice'  => 'alert alert-info',
+                    'warning' => 'alert alert-warning',
+                ]
+            );
+
+            return $flash;
+        }
+    );
+
+
+    // Start the session the first time when some component request the session service
+    $di->setShared(
+        'session',
+        function () {
+            $session = new Session();
+
+            $session->start();
+
+            return $session;
+        }
+    );
+
+    # https://stackoverflow.com/questions/24446258/phalcon-not-found-page-error-handler
+    $di->set('dispatcher', function() {
+
+        $eventsManager = new \Phalcon\Events\Manager();
+    
+        $eventsManager->attach("dispatch:beforeException", function($event, $dispatcher, $exception) {
+    
+            //Handle 404 exceptions
+            if ($exception instanceof \Phalcon\Mvc\Dispatcher\Exception) {
+                $dispatcher->forward(array(
+                    'controller' => 'index',
+                    'action' => 'show404'
+                ));
+                return false;
+            }
+    
+            //Handle other exceptions
+            $dispatcher->forward(array(
+                'controller' => 'index',
+                'action' => 'show503'
+            ));
+    
+            return false;
+        });
+    
+        $dispatcher = new \Phalcon\Mvc\Dispatcher();
+    
+        //Bind the EventsManager to the dispatcher
+        $dispatcher->setEventsManager($eventsManager);
+    
+        return $dispatcher;
+    
+    }, true);
 
     /**
-     * Setting up the view component
+     * Encryption/Decryption
+     * ----------------------
+     * https://docs.phalconphp.com/en/3.3/crypt
      */
-    $di->set('view', function () use ($config) {
-        $view = new View();
-        $view->setViewsDir($config->application->viewsDir);
-        return $view;
-    });
+    $di->set(
+        'crypt',
+        function () {
+            $crypt = new Crypt();
+    
+            // Set a global encryption key
+            $crypt->setKey(
+                "T4\xb1\x8d\xa9\x98\x05\\\x8c\xbe\x1d\T4\xb1\x8d\xa9\x98\x05\\\x8c\xbe\x1d\x07&[\x99\x18\xa4~Lc1\xbeW\xb3"
+            );
+    
+            return $crypt;
+        },
+        true
+    );
 
     /**
-     * Database connection is created based in the parameters defined in the configuration file
+     * Handle routes
      */
-    $di->set('db', function () use ($config) {
-        return new Database(
-            [
-                "host"     => $config->database->host,
-                "username" => $config->database->username,
-                "password" => $config->database->password,
-                "dbname"   => $config->database->name
-            ]
-        );
-    });
+    include APP_PATH . '/config/router.php';
 
     /**
-     * If the configuration specify the use of metadata adapter use it or use memory otherwise
+     * Read services
      */
-    $di->set('modelsMetadata', function () {
-        return new MemoryMetaData();
-    });
+    include APP_PATH . '/config/services.php';
 
     /**
-     * Start the session the first time some component request the session service
+     * Get config service for use in inline setup below
      */
-    $di->set('session', function () {
-        $session = new Session();
-        $session->start();
-        return $session;
-    });
+    $config = $di->getConfig();
+
+    /**
+     * Include Autoloader
+     */
+    include APP_PATH . '/config/loader.php';
 
     /**
      * Handle the request
      */
-    $application = new Application($di);
+    $application = new \Phalcon\Mvc\Application($di);
 
-    $response = $application->handle();
+    echo str_replace(["\n","\r","\t"], '', $application->handle()->getContent());
 
-    $response->send();
 } catch (\Exception $e) {
-    echo $e->getMessage();
+    echo $e->getMessage() . '<br>';
+    echo '<pre>' . $e->getTraceAsString() . '</pre>';
 }
