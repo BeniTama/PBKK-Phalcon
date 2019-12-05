@@ -1,1 +1,1 @@
-Dalam folder ini terdapat program Phalcon dasar yang isinya hanya page login yang tersambung ke database mySQL
+Berikut adalah program registrasi sederhana menggunakan Phalcon.
